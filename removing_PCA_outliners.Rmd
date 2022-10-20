@@ -1,0 +1,102 @@
+---
+title: "PCA remove the outliners"
+author: "Wangjingyi Liao c21102271"
+date: "17/08/2022"
+output: html_document
+---
+
+```{R}
+
+EU_mean <- PC %>% summarise_each(mean)
+EU_sd <- PC %>% summarise_each(sd)
+
+#5.2 calculate the limits of being GBR-like by with 4SD from the mean at each PC
+EU_mean_sd <- EU_mean %>% add_row(EU_sd) %>% add_column(statistics = c('mean', 'SD'), 
+                                                           .before = 'FamilyID') %>%
+  dplyr::select(-c('FamilyID', 'IndividualID'))
+
+
+EU_lowerlimit <- EU_mean_sd[1,2:11] - 4*EU_mean_sd[2,2:11]
+EU_upperlimit <- EU_mean_sd[1,2:11] + 4*EU_mean_sd[2,2:11]
+EU_limits <- EU_lowerlimit %>% 
+  add_row(EU_upperlimit) %>% 
+  add_column(statistics = c('lower_limit', 'upper_limit'), .before = 'PC1')
+EU_summary <- EU_mean_sd %>% 
+  add_row(EU_limits)
+
+
+```
+
+```{R}
+
+excluded <- PC %>% 
+  filter(PC1 > 0.0125 | PC1 < EU_summary[[3,2]] | 
+         PC2 > EU_summary[[4,3]] | PC2 < EU_summary[[3,3]] |
+         PC3 > EU_summary[[4,4]] | PC3 < EU_summary[[3,4]] |
+         PC4 > EU_summary[[4,5]] | PC4 < EU_summary[[3,5]] |
+         PC5 > EU_summary[[4,6]] | PC5 < EU_summary[[3,6]] |
+         PC6 > EU_summary[[4,7]] | PC6 < EU_summary[[3,7]] |
+         PC7 > EU_summary[[4,8]] | PC7 < EU_summary[[3,8]] |
+         PC8 > EU_summary[[4,9]] | PC8 < EU_summary[[3,9]] |
+         PC9 > EU_summary[[4,10]] | PC9 < EU_summary[[3,10]] |
+         PC10 > EU_summary[[4,11]] | PC10 < EU_summary[[3,11]])
+excluding_family_id <- excluded$FamilyID %>% unique()
+
+```
+
+
+```{R}
+
+PC_EU <- anti_join(PC, excluded)
+
+
+```
+
+
+
+
+```{r}
+
+library(ggpubr)
+
+pc12 <- ggplot(PC,aes(x = PC1, y = PC2)) + 
+  geom_point(colour = 'black', shape = 23, 
+             size = 1.5, show.legend = T) + ylim(NA,0.16) + xlim(NA,0.13)+theme_classic()
+
+pc23 <- ggplot(PC,aes(x = PC2, y = PC3)) + 
+  geom_point(colour = 'black', shape = 21, 
+             size = 1.5, show.legend = T)+ ylim(NA,0.12) + xlim(NA,0.16)+theme_classic()
+
+
+pc13 <- ggplot(PC,aes(x = PC1, y = PC3)) + 
+  geom_point(colour = 'black', shape = 21, 
+             size = 1.5, show.legend = T) + ylim(NA,0.12) + xlim(NA,0.13)+theme_classic()
+
+
+pceu12 <- ggplot(PC_EU,aes(x = PC1, y = PC2)) + 
+  geom_point(colour = 'black', shape = 21, 
+             size = 1.5, show.legend = T)+ ylim(NA,0.16) + xlim(NA,0.13)+theme_classic()
+
+
+pceu23 <- ggplot(PC_EU,aes(x = PC2, y = PC3)) + 
+  geom_point(colour = 'black', shape = 21, 
+             size = 1.5, show.legend = T)+ ylim(NA,0.12) + xlim(NA,0.16)+theme_classic()
+
+
+pceu13 <- ggplot(PC_EU,aes(x = PC1, y = PC3)) + 
+  geom_point(colour = 'black', shape = 21, 
+             size = 1.5, show.legend = T)+ ylim(NA,0.12) + xlim(NA,0.13)+theme_classic()
+
+tiff("figure4.tiff", units="in", width=8.5, height=5, res=300)
+
+figure <- ggarrange(pc12, pc23, pc13, pceu12, pceu23, pceu13,labels = c('PC1 v.s. PC2', 'PC2 v.s. PC3', 'PC1 v.s. PC3'), vjust = 0.01, hjust = 0, font.label = list(size = 10, color = "black", family = NULL)) + theme_void()+ggtitle('Figure 4: Principal Component Analysis') +theme(plot.title  = element_text(color = 'black', size = 14, face = 'bold', vjust =5.5, hjust = -0.1))
+
+figure <- annotate_figure(figure, right = text_grob('All Sample', vjust = 0.5,hjust = 1.7,rot = 270), left = '') 
+
+figure <- annotate_figure(figure, right = text_grob('EU Sample', vjust = 2.5,hjust = -0.5,rot = 270), left = '')
+
+figure + ggtitle('')+theme_void()
+
+dev.off()
+
+```

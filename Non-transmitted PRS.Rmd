@@ -1,0 +1,196 @@
+---
+title: "Non-transmitted PGS"
+author: "Wangjingyi Liao c21102271"
+date: "03/08/2022"
+output: html_document
+---
+
+### Read in PRS 
+```{r}
+colnames(phenotype_pc_prs)
+parent_proband_prs <- phenotype_pc_prs %>% dplyr::select(FamilyID, IndividualID, SCZ_Pt_0.05, IQ_Pt_0.05, BD_Pt_0.05, CUD_Pt_0.05, alcohol_Pt_0.05, MDD_Pt_0.05, EF_Pt_0.05, smoking_Pt_0.05)
+```
+
+
+### over transmitted and non transmitted PRS for SCZ
+```{r}
+parent_proband_prs_SCZ <- parent_proband_prs %>% dplyr::select(FamilyID, IndividualID, SCZ_Pt_0.05)
+
+parent_proband_prs_SCZ <- parent_proband_prs_SCZ %>% pivot_wider(names_from = IndividualID, values_from = SCZ_Pt_0.05)
+
+parent_proband_prs_SCZ
+
+parent_proband_prs_SCZ$non_transmitted_prs_scz <- (parent_proband_prs_SCZ$`2` + parent_proband_prs_SCZ$`3`) - parent_proband_prs_SCZ$`1`
+
+parent_proband_prs_SCZ$mean_parental_prs <- (parent_proband_prs_SCZ$`2` + parent_proband_prs_SCZ$`3`)/2
+
+parent_proband_prs_SCZ$pTDT_scz <- (parent_proband_prs_SCZ$`1` - parent_proband_prs_SCZ$mean_parental_prs) / sd(parent_proband_prs_SCZ$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_SCZ, na.rm = T)
+
+#summary(parent_proband_prs_SCZ, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+```
+
+### over transmitted and non transmitted PRS for IQ
+```{r}
+parent_proband_prs_IQ <- parent_proband_prs %>% dplyr::select(FamilyID, IndividualID, IQ_Pt_0.05)
+
+parent_proband_prs_IQ <- parent_proband_prs_IQ %>% pivot_wider(names_from = IndividualID, values_from = IQ_Pt_0.05)
+
+parent_proband_prs_IQ$non_transmitted_prs_IQ <- (parent_proband_prs_IQ$`2` + parent_proband_prs_IQ$`3`) - parent_proband_prs_IQ$`1`
+
+parent_proband_prs_IQ$mean_parental_prs <- (parent_proband_prs_IQ$`2` + parent_proband_prs_IQ$`3`)/2
+
+parent_proband_prs_IQ$pTDT_IQ <- (parent_proband_prs_IQ$`1` - parent_proband_prs_IQ$mean_parental_prs) / sd(parent_proband_prs_IQ$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_IQ, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+```
+
+### over transmitted and non transmitted PRS for EF
+```{r}
+parent_proband_prs_EF <- parent_proband_prs %>% dplyr::select(FamilyID, IndividualID, EF_Pt_0.05)
+
+parent_proband_prs_EF <- parent_proband_prs_EF %>% pivot_wider(names_from = IndividualID, values_from = EF_Pt_0.05)
+
+parent_proband_prs_EF$non_transmitted_prs_EF <- (parent_proband_prs_EF$`2` + parent_proband_prs_EF$`3`) - parent_proband_prs_EF$`1`
+
+parent_proband_prs_EF$mean_parental_prs <- (parent_proband_prs_EF$`2` + parent_proband_prs_EF$`3`)/2
+
+parent_proband_prs_EF$pTDT_EF <- (parent_proband_prs_EF$`1` - parent_proband_prs_EF$mean_parental_prs) / sd(parent_proband_prs_EF$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_EF, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+```
+
+### over transmitted and non transmitted PRS for BD
+```{r}
+parent_proband_prs_BD <- parent_proband_prs %>% dplyr::select(FamilyID, IndividualID, BD_Pt_0.05)
+
+parent_proband_prs_BD <- parent_proband_prs_BD %>% pivot_wider(names_from = IndividualID, values_from = BD_Pt_0.05)
+
+parent_proband_prs_BD
+
+parent_proband_prs_BD$non_transmitted_prs_bd <- (parent_proband_prs_BD$`2` + parent_proband_prs_BD$`3`) - parent_proband_prs_BD$`1`
+
+parent_proband_prs_BD$mean_parental_prs <- (parent_proband_prs_BD$`2` + parent_proband_prs_BD$`3`)/2
+
+parent_proband_prs_BD$pTDT_bd <- (parent_proband_prs_BD$`1` - parent_proband_prs_BD$mean_parental_prs) / sd(parent_proband_prs_BD$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_BD, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+```
+
+### over transmitted and non transmitted PRS for CUD
+```{r}
+parent_proband_prs_CUD <- parent_proband_prs %>% dplyr::select(FamilyID, IndividualID, CUD_Pt_0.05)
+
+parent_proband_prs_CUD <- parent_proband_prs_CUD %>% pivot_wider(names_from = IndividualID, values_from = CUD_Pt_0.05)
+
+parent_proband_prs_CUD
+
+parent_proband_prs_CUD$non_transmitted_prs_cud <- (parent_proband_prs_CUD$`2` + parent_proband_prs_CUD$`3`) - parent_proband_prs_CUD$`1`
+
+parent_proband_prs_CUD$mean_parental_prs <- (parent_proband_prs_CUD$`2` + parent_proband_prs_CUD$`3`)/2
+
+parent_proband_prs_CUD$pTDT_cud <- (parent_proband_prs_CUD$`1` - parent_proband_prs_CUD$mean_parental_prs) / sd(parent_proband_prs_CUD$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_CUD, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+```
+
+### over transmitted and non transmitted PRS for alcohol
+```{r}
+parent_proband_prs_alcohol <- parent_proband_prs %>% dplyr::select(FamilyID, IndividualID, alcohol_Pt_0.05)
+
+parent_proband_prs_alcohol <- parent_proband_prs_alcohol %>% pivot_wider(names_from = IndividualID, values_from = alcohol_Pt_0.05)
+
+parent_proband_prs_alcohol
+
+parent_proband_prs_alcohol$non_transmitted_prs_alcohol <- (parent_proband_prs_alcohol$`2` + parent_proband_prs_alcohol$`3`) - parent_proband_prs_alcohol$`1`
+
+parent_proband_prs_alcohol$mean_parental_prs <- (parent_proband_prs_alcohol$`2` + parent_proband_prs_alcohol$`3`)/2
+
+parent_proband_prs_alcohol$pTDT_alcohol <- (parent_proband_prs_alcohol$`1` - parent_proband_prs_alcohol$mean_parental_prs) / sd(parent_proband_prs_alcohol$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_alcohol, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+```
+
+### over transmitted and non transmitted PRS for smoking
+```{r}
+parent_proband_prs_smoking <- parent_proband_prs %>% dplyr::select(FamilyID, IndividualID, smoking_Pt_0.05)
+
+parent_proband_prs_smoking <- parent_proband_prs_smoking %>% pivot_wider(names_from = IndividualID, values_from = smoking_Pt_0.05)
+
+parent_proband_prs_smoking
+
+parent_proband_prs_smoking$non_transmitted_prs_smoking <- (parent_proband_prs_smoking$`2` + parent_proband_prs_smoking$`3`) - parent_proband_prs_smoking$`1`
+
+parent_proband_prs_smoking$mean_parental_prs <- (parent_proband_prs_smoking$`2` + parent_proband_prs_smoking$`3`)/2
+
+parent_proband_prs_smoking$pTDT_smoking <- (parent_proband_prs_smoking$`1` - parent_proband_prs_smoking$mean_parental_prs) / sd(parent_proband_prs_smoking$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_smoking, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+```
+
+### over transmitted and non transmitted PRS for MDD
+```{r}
+parent_proband_prs_MDD <- parent_proband_prs %>% dplyr::select(FamilyID, IndividualID, MDD_Pt_0.05)
+
+parent_proband_prs_MDD <- parent_proband_prs_MDD %>% pivot_wider(names_from = IndividualID, values_from = MDD_Pt_0.05)
+
+parent_proband_prs_MDD
+
+parent_proband_prs_MDD$non_transmitted_prs_mdd <- (parent_proband_prs_MDD$`2` + parent_proband_prs_MDD$`3`) - parent_proband_prs_MDD$`1`
+
+parent_proband_prs_MDD$mean_parental_prs <- (parent_proband_prs_MDD$`2` + parent_proband_prs_MDD$`3`)/2
+
+parent_proband_prs_MDD$pTDT_mdd <- (parent_proband_prs_MDD$`1` - parent_proband_prs_MDD$mean_parental_prs) / sd(parent_proband_prs_MDD$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_MDD, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+```
+### over transmitted and non transmitted PRS for Antidepressant
+#```{r}
+parent_proband_prs_Antidepressant  <- parent_proband_prs %>% select(FamilyID, IndividualID, AntiDepRemission_Pt_0.05)
+
+parent_proband_prs_Antidepressant  <- parent_proband_prs_Antidepressant  %>% pivot_wider(names_from = IndividualID, values_from = AntiDepRemission_Pt_0.05)
+
+parent_proband_prs_Antidepressant 
+
+parent_proband_prs_Antidepressant $non_transmitted_prs_antidepressant <- parent_proband_prs_Antidepressant $`2` + parent_proband_prs_Antidepressant $`3` - parent_proband_prs_Antidepressant $`1`
+
+parent_proband_prs_Antidepressant $mean_parental_prs <- (parent_proband_prs_Antidepressant $`2` + parent_proband_prs_Antidepressant $`3`)/2
+
+parent_proband_prs_Antidepressant$pTDT_antidepressant <- (parent_proband_prs_Antidepressant$`1` - parent_proband_prs_Antidepressant $mean_parental_prs) / sd(parent_proband_prs_Antidepressant$mean_parental_prs, na.rm = T)
+
+summary(parent_proband_prs_Antidepressant, na.rm = T)
+#1 - proband, 2 - father 3 - mother 
+#```
+
+
+### merge the datasets 
+```{r}
+
+ntPRS_pTDT <- parent_proband_prs_SCZ[, c('FamilyID', 'non_transmitted_prs_scz', 'pTDT_scz')] %>% 
+  left_join(parent_proband_prs_BD[,c('FamilyID', 'non_transmitted_prs_bd', 'pTDT_bd')], by = 'FamilyID') %>% 
+  left_join(parent_proband_prs_MDD[,c('FamilyID', 'non_transmitted_prs_mdd', 'pTDT_mdd')], by = 'FamilyID')%>% 
+  left_join(parent_proband_prs_IQ[,c('FamilyID', 'non_transmitted_prs_IQ', 'pTDT_IQ')], by = 'FamilyID') %>% 
+  left_join(parent_proband_prs_EF[,c('FamilyID', 'non_transmitted_prs_EF', 'pTDT_EF')], by = 'FamilyID') %>% 
+  left_join(parent_proband_prs_CUD[,c('FamilyID', 'non_transmitted_prs_cud', 'pTDT_cud')], by = 'FamilyID')%>% 
+  left_join(parent_proband_prs_alcohol[,c('FamilyID', 'non_transmitted_prs_alcohol', 'pTDT_alcohol')], by = 'FamilyID') %>% 
+  left_join(parent_proband_prs_smoking[,c('FamilyID', 'non_transmitted_prs_smoking', 'pTDT_smoking')], by = 'FamilyID') 
+  
+
+
+summary(ntPRS_pTDT)
+
+ntPRS_pTDT$'IndividualID' <- '1'
+
+phenotype_pc_prs <- left_join(phenotype_pc_prs,ntPRS_pTDT)
+
+```
+

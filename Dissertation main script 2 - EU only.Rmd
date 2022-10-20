@@ -1,0 +1,1179 @@
+---
+title: "Dissertation main script"
+author: "Wangjingyi Liao c21102271"
+date: "23/08/2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+options(knitr.duplicate.label = "allow")
+
+library(tidyverse)
+library(ggplot2)
+library(naniar)
+library(survival)
+library(survminer)
+library(flextable)
+library(ggpubr)
+library(gtsummary)
+library(webshot2)
+source_rmd = function(file, ...) {
+  tmp_file = tempfile(fileext=".R")
+  on.exit(unlink(tmp_file), add = TRUE)
+  knitr::purl(file, output=tmp_file)
+  source(file = tmp_file, ...)
+}
+
+
+
+```
+### Read in the phenotype files 
+```{R}
+
+phenotypeData <- read_table('../Data/BG_Trio_phenotypes.txt', col_names = T, col_types = 'cnnnnnnnnnn')
+
+
+phenotypeData2 <- read_table('../Data/BG_trios_YOB_blood.tsv', col_names = T)
+
+
+phenotypeData <- merge(phenotypeData,phenotypeData2)
+phenotypeData$age <- phenotypeData$blood_year - phenotypeData$Yearofbirth
+
+phenotypeData <- phenotypeData %>% relocate(SampleID, Yearofbirth, blood_year, age,everything())
+
+```
+
+
+### Remove the siblings data, keep only the proband and their parents, and remove the unkown sex individual
+```{r}
+
+phenotypeData2 <- phenotypeData %>% separate(SampleID, c('FamilyID', 'IndividualID')) 
+
+phenotypeData2[['IndividualID']] <- as.numeric(phenotypeData2[['IndividualID']])
+
+phenotypeData3 <- phenotypeData2 %>% filter(IndividualID ==1 | IndividualID==2 |IndividualID == 3) %>% filter(sex == 1 | sex == 2)
+
+phenotypeData3[['IID']] <- str_c(phenotypeData3$FamilyID, '-', phenotypeData3$IndividualID)
+
+phenotypeData3[['IndividualID']] <- as.character(phenotypeData3[['IndividualID']])
+
+phenotypeData_for_PRSice <- phenotypeData3 %>% dplyr::select(FamilyID)
+
+write.table(phenotypeData_for_PRSice, '../Data/PostQC.pheno', quote = F, row.names = F)
+
+
+```
+
+### Use pathfinder to covert the GWAS format
+
+e.g. Rscript summaRygwasqc.V1.3.5.R --GWAS CUD_EUR_casecontrol_public_11.14.2020 --HRC HRC.Chr --PRS F --mthres 0.01 --ithres 0.8 --MHC T
+
+
+### Use PRSice to calcualte the PRS
+
+FOR SCZ
+
+Rscript /mnt/d/Key\ Tools/PRSice_win64/PRSice.R 
+--prsice /mnt/d/Key\ Tools/PRSice_win64/PRSice_win64.exe 
+--A1 A1 
+--A2 A2 
+--bar-levels 0.001,0.05,0.5 
+--base daner_sz3_RyQC.txt  
+--binary-target F 
+--chr CHR 
+--clump-kb 250 
+--clump-p 1.000000 
+--clump-r2 0.200000 
+--fastscore 
+--model add 
+--out SCZ_polygenic 
+--all-score 
+--pheno-col sex 
+--pheno-file PostQC.pheno 
+--pvalue P 
+--snp SNP 
+--stat BETA 
+--target Bulgarian.Trios.QC.ALL 
+--thread 1
+
+
+### identify the non-european sample 
+```{r}
+
+PC <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/PCA/Trios_PCA1.eigenvec', col_names = F)
+PC <- PC[, 2:12]
+colnames(PC) <- c('IID','PC1', 'PC2', 'PC3', 'PC4', 'PC5', 'PC6', 'PC7', 'PC8', 'PC9', 'PC10')
+PC <- PC %>% separate(IID, c('FamilyID', 'IndividualID')) 
+
+PC[['FamilyID']] <- as.character(PC[['FamilyID']])
+
+
+source_rmd('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Script/removing_PCA_outliners.Rmd')
+
+```
+
+### Merge the PRS results with the phenotype and PCs
+
+```{r}
+phenotype_pc <- left_join(PC,phenotypeData3)
+
+
+SCZ_PRS <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/SZC PGS/SCZ_polygenic.all_score')
+SCZ_PRS[['FID']] <- as.character(SCZ_PRS[['FID']])
+colnames(SCZ_PRS) <- c('FamilyID', 'IID', 'SCZ_Pt_0.001', 'SCZ_Pt_0.05', 'SCZ_Pt_0.5','SCZ_Pt_1')
+phenotype_pc_prs <- left_join(phenotype_pc, SCZ_PRS)
+
+BD_PRS <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/Biopolar PGS/BD_polygenic.all_score')
+BD_PRS[['FID']] <- as.character(BD_PRS[['FID']])
+colnames(BD_PRS) <- c("FamilyID", "IID", "BD_Pt_0.001", "BD_Pt_0.05", "BD_Pt_0.5", "BD_Pt_1")
+phenotype_pc_prs <- left_join(phenotype_pc_prs, BD_PRS)
+
+MDD_PRS <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/MDD PGS/MDD_PGS.all_score')
+MDD_PRS[['FID']] <- as.character(MDD_PRS[['FID']])
+colnames(MDD_PRS) <- c("FamilyID", "IID", "MDD_Pt_0.001", "MDD_Pt_0.05", "MDD_Pt_0.5", "MDD_Pt_1")
+phenotype_pc_prs <- left_join(phenotype_pc_prs, MDD_PRS)
+
+IQ_PRS <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/IQ PGS/iq_polygenic.all_score')
+IQ_PRS[['FID']] <- as.character(IQ_PRS[['FID']])
+colnames(IQ_PRS) <- c("FamilyID", "IID", "IQ_Pt_0.001", "IQ_Pt_0.05", "IQ_Pt_0.5", "IQ_Pt_1")
+phenotype_pc_prs <- left_join(phenotype_pc_prs, IQ_PRS)
+
+
+EF_PRS <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/EF PGS/EF_PGS.all_score')
+EF_PRS[['FID']] <- as.character(EF_PRS[['FID']])
+colnames(EF_PRS) <- c("FamilyID", "IID", "EF_Pt_0.001", "EF_Pt_0.05", "EF_Pt_0.5", "EF_Pt_1")
+phenotype_pc_prs <- left_join(phenotype_pc_prs, EF_PRS)
+
+CUD_PRS <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/CUD PGS/CUD_polygenic.all_score')
+CUD_PRS[['FID']] <- as.character(CUD_PRS[['FID']])
+colnames(CUD_PRS) <- c("FamilyID", "IID", "CUD_Pt_0.001", "CUD_Pt_0.05", "CUD_Pt_0.5", "CUD_Pt_1")
+phenotype_pc_prs <- left_join(phenotype_pc_prs, CUD_PRS)
+
+alcohol_PRS <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/Alcohol Dependence PGS/alcohol_dep_pgs.all_score')
+alcohol_PRS[['FID']] <- as.character(alcohol_PRS[['FID']])
+colnames(alcohol_PRS) <- c("FamilyID", "IID", "alcohol_Pt_0.001", "alcohol_Pt_0.05", "alcohol_Pt_0.5", "alcohol_Pt_1")
+phenotype_pc_prs <- left_join(phenotype_pc_prs, alcohol_PRS)
+
+Smoking_PRS <- read_table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/Smoking PGS/smoking_PGS.all_score')
+Smoking_PRS[['FID']] <- as.character(Smoking_PRS[['FID']])
+colnames(Smoking_PRS) <- c("FamilyID", "IID", "smoking_Pt_0.001", "smoking_Pt_0.05", "smoking_Pt_0.5", "smoking_Pt_1")
+phenotype_pc_prs <- left_join(phenotype_pc_prs, Smoking_PRS)
+
+phenotype_pc_prs <- phenotype_pc_prs %>% 
+  mutate_at(c('SCZ_Pt_0.001', 'SCZ_Pt_0.05', 'SCZ_Pt_0.5','SCZ_Pt_1', 
+              "BD_Pt_0.001", "BD_Pt_0.05", "BD_Pt_0.5", "BD_Pt_1",
+              "MDD_Pt_0.001", "MDD_Pt_0.05", "MDD_Pt_0.5", "MDD_Pt_1",
+              "IQ_Pt_0.001", "IQ_Pt_0.05", "IQ_Pt_0.5", "IQ_Pt_1", 
+              "EF_Pt_0.001", "EF_Pt_0.05", "EF_Pt_0.5", "EF_Pt_1", 
+              "CUD_Pt_0.001", "CUD_Pt_0.05", "CUD_Pt_0.5", "CUD_Pt_1",
+              "alcohol_Pt_0.001", "alcohol_Pt_0.05", "alcohol_Pt_0.5", "alcohol_Pt_1",
+              "smoking_Pt_0.001", "smoking_Pt_0.05", "smoking_Pt_0.5", "smoking_Pt_1"), ~(scale(.) %>% as.vector))
+
+
+```
+
+### read-in Durations_of_illness variable 
+```{r}
+Durations_of_illness<- read.table('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Data/BG_Illness_duration.txt', header = T, sep = '\t', na.strings = " ") %>% dplyr::select(-age)
+phenotype_pc_prs <- left_join(phenotype_pc_prs, Durations_of_illness, by = c('IID' = 'SampleID',"sex", "ill_onset_imp", "first_hosp", "num_hosp"))
+
+```
+### read_in family history and create new binary variable
+```{r}
+family_history <- read.table('../Data/BG_trios_fh.txt', head = T, sep = '\t')
+
+family_history$fam_hist_proximity %>% table(useNA='always')
+#2 = close family (parents/sibling)
+#1 = distal family (cousins, grandparents)
+#0 = no family history (donot have or dont know)
+family_history$fam_hist_psychosis %>% table(useNA='always')
+#2 = psychosis
+#1 = other mental disease
+#0 = no family history
+
+family_history <- family_history %>% mutate(family_history = case_when(fam_hist_proximity >0 & fam_hist_psychosis > 0 ~ 1, fam_hist_proximity == 0 & fam_hist_psychosis == 0 ~ 0))
+
+phenotype_pc_prs  <- left_join(phenotype_pc_prs, family_history, by = c('IID' = 'SampleID'))
+
+phenotype_pc_prs$family_history %>% table(useNA='always')
+
+parent_psychosis <- family_history %>% mutate(parent_psychosis = case_when(fam_hist_proximity == 2 & fam_hist_psychosis ==2 ~ 1, fam_hist_proximity < 2 | fam_hist_psychosis < 2 ~ 0))
+
+phenotype_pc_prs  <- left_join(phenotype_pc_prs, parent_psychosis[,c('SampleID', 'parent_psychosis')], by = c('IID' = 'SampleID'))
+
+phenotype_pc_prs$parent_psychosis %>% table(useNA='always')
+
+```
+
+
+
+
+### create the ntPRS and pTDT
+
+```{R}
+source_rmd('D:/MSc Bioinformatics and genetic epidemology/Dissertation/Script/Non-transmitted PRS.Rmd')
+```
+
+### create a binary quality of remission variable
+
+```{r}
+phenotype_pc_prs <- phenotype_pc_prs %>% mutate(binary_quality_remission = case_when(quality_remissions == 1 ~ 1, quality_remissions > 1 ~ 0))
+
+
+```
+
+### limite the data to cases only, EU sample, DSM2&3 and duration <5
+```{r}
+
+case_phenotype_prs <- phenotype_pc_prs %>% 
+  filter(IndividualID == 1) %>% 
+  filter(DSM4 ==2 | DSM4 ==3) %>%
+  filter(!(FamilyID %in% excluding_family_id))
+
+
+case_phenotype_prs <- case_phenotype_prs %>% replace_with_na(replace = list(quality_remissions = 0)) %>% 
+  replace_with_na(replace = list(first_hosp = 0)) %>% 
+  replace_with_na(replace = list(num_hosp = 0))
+
+```
+### Range, mean, median, and missiness in the phenotypes. 
+```{r}
+#ggplot(case_phenotype_prs, aes(x = ill_onset_imp)) + geom_histogram(aes(y = ..density..),colour="black", fill="white") +geom_density(alpha=.2, fill="#FF6666")+facet_grid(sex ~ ., labeller = labeller(sex = sex.labs))+ggtitle('Figure 3:Distribution of illness onset')+xlab('Illness Onset') + ylab('Density')
+
+case_phenotype_prs %>% 
+  group_by(sex) %>% 
+  summarize(mean = mean(ill_onset_imp, na.rm = T),
+            sd = sd(ill_onset_imp, na.rm = T))
+
+#ggplot(case_phenotype_prs, aes(x = quality_remissions)) + geom_histogram(aes(y =..density..),colour="black", fill="white") +geom_density(alpha=.2, fill="#FF6666")+facet_grid(sex ~ ., labeller = labeller(sex = sex.labs))+ggtitle('Figure 2:Distribution of the Quality of Remission')+xlab('Quality of Remission') + ylab('Density')
+
+case_phenotype_prs %>% 
+  group_by(sex) %>% 
+  summarize(median = median(quality_remissions, na.rm = T))
+
+
+#ggplot(case_phenotype_prs, aes(x = num_hosp)) + geom_histogram(aes(y = ..density..),colour="black", fill="white") +geom_density(alpha=.2, fill="#FF6666")+facet_grid(sex ~ ., labeller = labeller(sex = sex.labs))+ggtitle('Figure 1:Distribution of the number of hospitalization')+xlab('Number of Hospitalization') + ylab('Density')
+
+case_phenotype_prs %>% 
+  group_by(sex) %>% 
+  summarize(mean = mean(num_hosp, na.rm = T),
+            sd = sd(num_hosp, na.rm = T))
+
+
+
+```
+
+### create survival objects
+```{r}
+
+case_phenotype_prs$status <- 1
+
+surv_object_illonset <- Surv(case_phenotype_prs$ill_onset_imp, case_phenotype_prs$status)
+fit1 <- survfit(surv_object_illonset ~ 1, data = case_phenotype_prs)
+ggsurvplot(fit1,data = case_phenotype_prs, pval = T)
+
+#surv_object_first_hosp <- Surv(case_phenotype_prs$first_hosp, case_phenotype_prs$status)
+#fit2 <- survfit(surv_object_first_hosp ~ 1, data = case_phenotype_prs)
+#ggsurvplot(fit2,data = case_phenotype_prs, pval = T)
+
+```
+
+
+### change the classes of data
+```{r}
+
+library(MASS)
+
+case_phenotype_prs$quality_remissions <- as.factor(case_phenotype_prs$quality_remissions)
+case_phenotype_prs$place_of_birth_num <- as.factor(case_phenotype_prs$place_of_birth)
+
+```
+
+### regression analysis for PRS
+```{r}
+library(stringr)
+```
+
+#### results
+
+### illness onset prs
+```{r}
+age_onset_prsmod <- list()
+age_onset_prstable <- data.frame()
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex','PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs),'_0.05')[i:i]
+  predictor <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  age_onset_prsmod[[i]] <- coxph(surv_object_illonset~., data = case_phenotype_prs[, c(predictor)]) 
+  summary <- summary(age_onset_prsmod[[i]])
+  age_onset_prstable <- data.frame(PRS=rownames(summary$conf.int)[1],'Parameter Estimate'= summary$coefficients[predictors_prs,'coef'],'P value'=summary$coefficients[predictors_prs,'Pr(>|z|)'], 'Hazard ratios' = summary$conf.int[predictors_prs,'exp(coef)'], 'HR CI lower' = summary$conf.int[predictors_prs, 'lower .95'], 'HR CI upper' = summary$conf.int[predictors_prs, 'upper .95']) %>% add_row(age_onset_prstable,.before = 1)
+}
+
+age_onset_prstable <- age_onset_prstable %>% mutate(PRS = str_replace(PRS,'SCZ_Pt_0.05', 'Schizophrenia'),PRS = str_replace(PRS,'BD_Pt_0.05', 'Bipolar Disorder'), PRS = str_replace(PRS,'MDD_Pt_0.05', 'Depression'), PRS = str_replace(PRS,'IQ_Pt_0.05', 'IQ'), PRS = str_replace(PRS,'EF_Pt_0.05', 'Executive Function'), PRS = str_replace(PRS,'CUD_Pt_0.05', 'Cannabis Use'), PRS = str_replace(PRS,'alcohol_Pt_0.05', 'Alcohol Dependence'),PRS = str_replace(PRS,'smoking_Pt_0.05', 'Smoking'))
+
+
+age_onset_prstable <- age_onset_prstable %>% mutate(sign = case_when(P.value < 0.05 ~ 'Significant at p = 0.05', P.value > 0.05 ~ 'Not significant'))
+
+#nothing passed correction
+
+age_onset_prstable_word <- mutate_if(age_onset_prstable, is.numeric, round, digit = 3) 
+
+age_onset_prstable_word <- flextable(age_onset_prstable_word, col_keys = c('PRS', 'Parameter.Estimate', 'HRCI', 'P.value')) %>% 
+  compose(j = 'HRCI', value = as_paragraph(sprintf(Hazard.ratios,fmt = '%#.3f '), as_bracket(HR.CI.lower, HR.CI.upper))) %>% 
+  add_header_lines('Table  9: Proband PRS and Illness Onset - EU') %>% 
+  color(~ P.value < 0.001, ~ P.value, color = "red") %>% 
+  set_header_labels(values = list(
+  PRS = 'PGS',
+  Parameter.Estimate = 'Parameter', 
+  P.value = 'P value',
+  HRCI = 'Hazard Ratio (95% CI)'
+)) %>% set_table_properties(layout = "autofit") 
+
+```
+
+
+
+### Illness onset ntprs
+```{r}
+age_onset_ntprsmod <- list()
+age_onset_ntprstable <- data.frame()
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex','PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_ntprs <- str_subset(colnames(case_phenotype_prs),'non_transmitted')[i:i]
+  predictor <- predictors_ntprs %>% append(predictors_covariables) %>% na.omit()
+  age_onset_ntprsmod[[i]] <- coxph(surv_object_illonset~., data = case_phenotype_prs[, c(predictor)]) 
+  summary <- summary(age_onset_ntprsmod[[i]])
+  age_onset_ntprstable <- data.frame(ntPRS=rownames(summary$conf.int)[1],'Parameter Estimate'= summary$coefficients[predictors_ntprs,'coef'],'P value'=summary$coefficients[predictors_ntprs,'Pr(>|z|)'], 'Hazard ratios' = summary$conf.int[predictors_ntprs,'exp(coef)'], 'HR CI lower' = summary$conf.int[predictors_ntprs, 'lower .95'], 'HR CI upper' = summary$conf.int[predictors_ntprs, 'upper .95']) %>% add_row(age_onset_ntprstable,.before = 1)
+}
+
+p.adjust(age_onset_ntprstable$'P.value', method='bonferroni', n = 24)
+
+age_onset_ntprstable <- age_onset_ntprstable %>% mutate(ntPRS = str_replace(ntPRS,'non_transmitted_prs_scz', 'Schizophrenia'),ntPRS = str_replace(ntPRS,'non_transmitted_prs_bd', 'Bipolar Disorder'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_mdd', 'Depression'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_IQ', 'IQ'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_EF', 'Executive Function'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_cud', 'Cannabis Use'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_alcohol', 'Alcohol Dependence'),ntPRS = str_replace(ntPRS,'non_transmitted_prs_smoking', 'Smoking'))
+ 
+age_onset_ntprstable <- age_onset_ntprstable %>% mutate(sign = case_when(P.value < 0.05 ~ 'Significant at p = 0.05', P.value > 0.05 ~ 'Not significant'))
+
+#nothing passed
+# definitely a trend between IQ and smoking and earier age onset
+
+
+age_onset_ntprstable_word <- mutate_if(age_onset_ntprstable, is.numeric, round, digit = 3) 
+
+age_onset_ntprstable_word <- flextable(age_onset_ntprstable_word, col_keys = c('ntPRS', 'Parameter.Estimate', 'HRCI', 'P.value')) %>% 
+  compose(j = 'HRCI', value = as_paragraph(sprintf(Hazard.ratios,fmt = '%#.3f '), as_bracket(HR.CI.lower, HR.CI.upper))) %>% 
+  add_header_lines('Table  10: Proband ntPRS and Illness Onset - EU') %>% 
+  color(~ P.value < 0.001, ~ P.value, color = "red") %>% 
+  set_header_labels(values = list(
+  ntPRS = 'ntPGS',
+  Parameter.Estimate = 'Parameter', 
+  P.value = 'P value',
+  HRCI = 'Hazard Ratio (95% CI)'
+)) %>% set_table_properties(layout = "autofit") 
+```
+
+```{r}
+age_onset_ntprstable
+age_onset_prstable
+
+colnames(age_onset_ntprstable)[1] <- 'PGS'
+colnames(age_onset_prstable)[1] <- 'PGS'
+age_onset_ntprstable$type <- 'ntPGS'
+age_onset_prstable$type <- 'PGS'
+
+test <- rbind(age_onset_prstable, age_onset_ntprstable)
+test$type <- as.factor(test$type) %>% relevel('PGS')
+test$PGS <- as.factor(test$PGS) %>% ordered(levels = rev(c('Schizophrenia',"Bipolar Disorder","Depression","IQ","Executive Function","Cannabis Use","Alcohol Dependence","Smoking")))
+
+
+ggplot(test, aes(y = PGS, x = Hazard.ratios)) +
+  geom_point(aes(color = sign),shape = 18, size = 5) +  
+  scale_color_manual(values = c("black", 'pink'), name = '') + 
+  geom_errorbarh(aes(xmin = HR.CI.lower, xmax = HR.CI.upper), height = 0.25) +
+  geom_vline(xintercept = 1, color = "red", linetype = "dashed", cex = 1, alpha = 0.5) + facet_wrap(~type)+
+  xlab("Hazard Ratio (95% CI)") + 
+  ylab(" ") + theme_classic() +
+  ggtitle('Figure 8: Polygenic Scores and non-transmitted PGS with Illness Onset - EU') +
+  theme(plot.title = element_text(hjust = 0.7))
+
+ggsave(filename = 'figure8_prs_ntprs_illness_onset-eu.tiff', units = 'in', width = 7.5, height = 5, dpi = 700, device = 'tiff')
+
+table6 <- as_grouped_data(x = test, groups = c('type')) %>% flextable::as_flextable(col_keys = c('Genotype', 'HRCI', 'P.value'))%>% compose(j = 'Genotype',i= ~ is.na(type), value = as_paragraph(PGS)) %>% 
+  compose(j = 'HRCI', i= ~ is.na(type), value = as_paragraph(sprintf(Hazard.ratios,fmt = '%#.3f '), as_bracket(HR.CI.lower, HR.CI.upper))) %>%
+  compose(j = 'P.value', i= ~ is.na(type), value = as_paragraph(sprintf(P.value,fmt = '%#.3f ')))%>% 
+  add_header_lines('Table  6: Proband PGS, ntPGS and Illness Onset - EU') %>% 
+  color(~ P.value < 0.05, ~ P.value, color = "red") %>% 
+  set_header_labels(values = list(
+  P.value = 'P value',
+  HRCI = 'Hazard Ratio (95% CI)'
+)) %>% bold(j = 1, i = ~ !is.na(type), bold = TRUE, part = "body") %>%
+  bold(part = "header", bold = TRUE)%>% set_table_properties(layout = "autofit")
+table6 %>% save_as_docx(path = 'table6.docx')
+table6 %>%save_as_image(path = 'table6.png')
+```
+### quality remission PRS
+```{r}
+quality_remission_prsmod <- list()
+quality_remission_prstable <- data.frame()
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex','PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs),'_0.05')[i:i] %>% append(predictors_covariables) %>% na.omit()
+  quality_remission_prsmod[[i]] <- polr(quality_remissions~.,data = case_phenotype_prs[, c('quality_remissions', predictors_prs)],Hess=T)
+  table <- coef(summary(quality_remission_prsmod[[i]]))
+  p <- pnorm(abs(table[, 't value']), lower.tail = F)*2
+  table <- cbind(table, 'p value' = p) %>% as.data.frame()
+  ci<- confint(quality_remission_prsmod[[i]])%>% as.data.frame()
+  or_ci <- exp(cbind(OR = coef(quality_remission_prsmod[[i]]), ci)) %>% as.data.frame()
+  table <- table[1,] %>% cbind(or_ci[1,]) 
+  quality_remission_prstable <- data.frame(PRS=rownames(table), Coefficient = table$Value, Odds.Ratio = table$OR, OR_CI_lower = table$`2.5 %`, OR_CI_upper = table$`97.5 %`, pvalue=table$`p value`) %>% add_row(quality_remission_prstable,.before = 1)
+}
+
+library(brant)
+library(regclass)
+quality_remission_sc <- polr(quality_remissions ~., data = case_phenotype_prs[, c('quality_remissions', 'SCZ_Pt_0.05', predictors_covariables)],Hess=T)
+
+brant(quality_remission_sc)
+
+fit2 <- lm(as.numeric(quality_remissions)~., data = case_phenotype_prs[, c('quality_remissions', 'SCZ_Pt_0.05', predictors_covariables)])
+regclass::VIF(fit2)
+
+
+quality_remission_prstable <- quality_remission_prstable %>% mutate(sign = case_when(pvalue < 0.05 ~ 'Significant at p = 0.05', pvalue > 0.05 ~ 'Not significant'))
+
+quality_remission_prstable<- quality_remission_prstable %>% mutate(PRS = str_replace(PRS,'SCZ_Pt_0.05', 'Schizophrenia'),PRS = str_replace(PRS,'BD_Pt_0.05', 'Bipolar Disorder'), PRS = str_replace(PRS,'MDD_Pt_0.05', 'Depression'), PRS = str_replace(PRS,'IQ_Pt_0.05', 'IQ'), PRS = str_replace(PRS,'EF_Pt_0.05', 'Executive Function'), PRS = str_replace(PRS,'CUD_Pt_0.05', 'Cannabis Use'), PRS = str_replace(PRS,'alcohol_Pt_0.05', 'Alcohol Dependence'),PRS = str_replace(PRS,'smoking_Pt_0.05', 'Smoking'))
+                                                  
+quality_remission_prstable_word <- mutate_if(quality_remission_prstable, is.numeric, round, digit = 3) 
+
+quality_remission_prstable_word <- flextable(quality_remission_prstable_word, col_keys = c('PRS', 'Coefficient', 'OddRatioCL', 'pvalue')) %>% 
+  compose(j = 'OddRatioCL', value = as_paragraph(sprintf(Odds.Ratio,fmt = '%#.3f '), as_bracket(OR_CI_lower, OR_CI_upper))) %>% 
+  add_header_lines('Table  11: Proband PRS and Quality of Remission - EU') %>% 
+  color(~ pvalue < 0.001, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  Coefficient = 'Coefficient',
+  pvalue = 'P value',
+  OddRatioCL = 'Odd Ratio (95% CI)')) %>% 
+  set_table_properties(layout = "autofit") 
+
+# nothing passed multiple comparision problems
+```
+### quality remission ntprs
+```{r}
+
+
+quality_remission_ntprsmod <- list()
+quality_remission_ntprstable <- data.frame()
+
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex', 'PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_ntprs <- str_subset(colnames(case_phenotype_prs),'non_transmitted')[i:i] %>% append(predictors_covariables) %>% na.omit()
+  quality_remission_ntprsmod[[i]] <- polr(quality_remissions~.,data = case_phenotype_prs[, c('quality_remissions', predictors_ntprs)],Hess=T)
+  table <- coef(summary(quality_remission_ntprsmod[[i]]))
+  p <- pnorm(abs(table[, 't value']), lower.tail = F)*2
+  table <- cbind(table, 'p value' = p) %>% as.data.frame()
+  ci<- confint(quality_remission_ntprsmod[[i]])%>% as.data.frame()
+  or_ci <- exp(cbind(OR = coef(quality_remission_ntprsmod[[i]]), ci)) %>% as.data.frame()
+  table <- table[1,] %>% cbind(or_ci[1,]) 
+  quality_remission_ntprstable <- data.frame(ntPRS=rownames(table), Coefficient = table$Value, 'Odds Ratio' = table$OR,  OR_CI_lower = table$`2.5 %`, OR_CI_upper = table$`97.5 %`,pvalue=table$`p value`) %>% add_row(quality_remission_ntprstable,.before = 1)
+}
+
+
+
+quality_remission_ntprstable <- quality_remission_ntprstable %>% mutate(sign = case_when(pvalue < 0.05 ~ 'Significant at p = 0.05', pvalue > 0.05 ~ 'Not significant'))
+
+#nothing passed
+quality_remission_ntprstable <- quality_remission_ntprstable %>% mutate(ntPRS = str_replace(ntPRS,'non_transmitted_prs_scz', 'Schizophrenia'),ntPRS = str_replace(ntPRS,'non_transmitted_prs_bd', 'Bipolar Disorder'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_mdd', 'Depression'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_IQ', 'IQ'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_EF', 'Executive Function'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_cud', 'Cannabis Use'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_alcohol', 'Alcohol Dependence'),ntPRS = str_replace(ntPRS,'non_transmitted_prs_smoking', 'Smoking'))
+                                                  
+quality_remission_ntprstable_word <- mutate_if(quality_remission_ntprstable, is.numeric, round, digit = 3) 
+
+quality_remission_ntprstable_word <- flextable(quality_remission_ntprstable_word, col_keys = c('ntPRS', 'Coefficient', 'OddRatioCL', 'pvalue')) %>% 
+  compose(j = 'OddRatioCL', value = as_paragraph(sprintf(Odds.Ratio,fmt = '%#.3f '), as_bracket(OR_CI_lower, OR_CI_upper))) %>% 
+  add_header_lines('Table  12: Proband ntPRS and Quality of Remission - EU') %>% 
+  color(~ pvalue < 0.001, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+    ntPRS = 'ntPGS',
+  Coefficient = 'Coefficient',
+  pvalue = 'P value',
+  OddRatioCL = 'Odd Ratio (95% CI)')) %>% 
+  set_table_properties(layout = "autofit") 
+```
+
+```{r}
+quality_remission_prstable
+quality_remission_ntprstable
+
+quality_remission_ntprstable$type <- 'ntPGS'
+quality_remission_prstable$type <- 'PGS'
+
+colnames(quality_remission_prstable)[1] <- 'PGS'
+colnames(quality_remission_ntprstable)[1] <- 'PGS'
+
+
+test <- rbind(quality_remission_prstable, quality_remission_ntprstable)
+
+test$type <- as.factor(test$type) %>% relevel('PGS')
+test$PGS <- as.factor(test$PGS) %>% ordered(levels = rev(c('Schizophrenia',"Bipolar Disorder","Depression","IQ","Executive Function","Cannabis Use","Alcohol Dependence","Smoking")))
+
+
+ggplot(test, aes(y = PGS, x = Odds.Ratio)) +
+  geom_point(aes(color = sign),shape = 18, size = 5) +  
+  scale_color_manual(values = c("black", 'pink'), name = '') + 
+  geom_errorbarh(aes(xmin = OR_CI_lower, xmax = OR_CI_upper), height = 0.25) +
+  geom_vline(xintercept = 1, color = "red", linetype = "dashed", cex = 1, alpha = 0.5) + facet_wrap(~type)+
+  xlab("Odd Ratio (95% CI)") + 
+  ylab(" ") + theme_classic() +
+  ggtitle('Figure 9: Polygenic Scores and non-transmitted PGS with Quality of Remission - EU') +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave(filename = 'figure9_prs_ntprs_quality_remission-eu.tiff', units = 'in', width = 7.5, height = 5, dpi = 700, device = 'tiff')
+
+table7 <- as_grouped_data(x = test, groups = c('type')) %>% flextable::as_flextable(col_keys = c('Genotype', 'ORCI', 'pvalue'))%>%compose(j = 'Genotype',i= ~ is.na(type), value = as_paragraph(PGS))%>% 
+  compose(j = 'ORCI', i= ~ is.na(type), value = as_paragraph(sprintf(Odds.Ratio,fmt = '%#.3f '), as_bracket(OR_CI_lower, OR_CI_upper)))%>%
+  compose(j = 'pvalue', i= ~ is.na(type), value = as_paragraph(sprintf(pvalue,fmt = '%#.3f '))) %>% 
+  add_header_lines('Table  7: Proband PGS, ntPGS and Quality of Remission - EU') %>% 
+  color(~ pvalue < 0.05, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  pvalue = 'P value',
+  ORCI = 'Odd Ratio (95% CI)'
+)) %>% bold(j = 1, i = ~ !is.na(type), bold = TRUE, part = "body") %>%
+  bold(part = "header", bold = TRUE)%>% set_table_properties(layout = "autofit")
+table7 %>% save_as_docx(path = 'table7.docx')
+table7 %>%save_as_image(path = 'table7.png')
+
+```
+
+```{r}
+
+bi_quality_remissions_SCZPGS_glm <- glm(binary_quality_remission ~ SCZ_Pt_0.05 +
+                                          DSM4 + sex + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10,data = case_phenotype_prs, family = binomial)
+summary(bi_quality_remissions_SCZPGS_glm)
+
+```
+
+
+### number of hosp PRS
+```{r}
+
+num_hosp_prsmod <- list()
+num_hosp_prstable <- data.frame()
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness','PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs),'_0.05')[i:i] 
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_prsmod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_prsmod[[i]])
+  confint <- confint(num_hosp_prsmod[[i]])
+  num_hosp_prstable <- data.frame(PRS=rownames(summary$coefficients)[2], Estimate = summary$coefficients[predictors_prs,'Estimate'],RateRatio = exp(summary$coefficients[predictors_prs,'Estimate']), CI_lower = exp(confint[predictors_prs, '2.5 %']), CI_upper = exp(confint[predictors_prs, '97.5 %']), pvalue=summary$coefficients[predictors_prs,'Pr(>|z|)']) %>% add_row(num_hosp_prstable,.before = 1)
+}
+summary(num_hosp_prsmod[[2]])
+#explantiohn use odd ratio to make esier interprettion
+
+
+num_hosp_prstable <- num_hosp_prstable %>% mutate(sign = case_when(pvalue < 0.05 ~ 'Significant at p = 0.05', pvalue > 0.05 ~ 'Not significant'))
+
+num_hosp_prstable<- num_hosp_prstable %>% mutate(PRS = str_replace(PRS,'SCZ_Pt_0.05', 'Schizophrenia'),PRS = str_replace(PRS,'BD_Pt_0.05', 'Bipolar Disorder'), PRS = str_replace(PRS,'MDD_Pt_0.05', 'Depression'), PRS = str_replace(PRS,'IQ_Pt_0.05', 'IQ'), PRS = str_replace(PRS,'EF_Pt_0.05', 'Executive Function'), PRS = str_replace(PRS,'CUD_Pt_0.05', 'Cannabis Use'), PRS = str_replace(PRS,'alcohol_Pt_0.05', 'Alcohol Dependence'),PRS = str_replace(PRS,'smoking_Pt_0.05', 'Smoking'))
+                                                  
+num_hosp_prstable_word <- mutate_if(num_hosp_prstable, is.numeric, round, digit = 3) 
+
+num_hosp_prstable_word <- flextable(num_hosp_prstable_word, col_keys = c('PRS', 'Estimate', 'RateRatioCL', 'pvalue')) %>% 
+  compose(j = 'RateRatioCL', value = as_paragraph(sprintf(RateRatio,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>% 
+  add_header_lines('Table  13: Proband PRS and Number of Hospitalization - EU') %>% 
+  color(~ pvalue < 0.001, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  Estimate = 'Beta',
+  pvalue = 'P value',
+  RateRatioCL = 'Rate Ratio (95% CI)'
+)) %>% 
+  set_table_properties(layout = "autofit") 
+
+# BD passed multiple comparision problems
+#analysis for pTDT
+pTDT_bd_for_num_hosp  <- glm.nb(num_hosp ~ pTDT_bd + DSM4 + sex + age + Durations_of_illness,data = case_phenotype_prs)
+
+summary(pTDT_bd_for_num_hosp)
+
+
+
+```
+
+### number of hosp ntPRS
+```{R}
+num_hosp_ntprsmod <- list()
+num_hosp_ntprstable <- data.frame()
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness','PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_ntprs <- str_subset(colnames(case_phenotype_prs),'non_transmitted')[i:i] 
+  predictors <- predictors_ntprs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_ntprsmod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_ntprsmod[[i]])
+  confint <- confint(num_hosp_ntprsmod[[i]])
+  num_hosp_ntprstable <- data.frame(ntPRS=rownames(summary$coefficients)[2],  Estimate = summary$coefficients[predictors_ntprs,'Estimate'], RateRatio = exp(summary$coefficients[predictors_ntprs,'Estimate']), CI_lower = exp(confint[predictors_ntprs, '2.5 %']), CI_upper = exp(confint[predictors_ntprs, '97.5 %']), pvalue =summary$coefficients[predictors_ntprs,'Pr(>|z|)']) %>% add_row(num_hosp_ntprstable,.before = 1)
+}
+p.adjust(num_hosp_ntprstable$'pvalue', method='bonferroni', n = 24)
+
+num_hosp_ntprstable <- num_hosp_ntprstable %>% mutate(sign = case_when(pvalue < 0.05 ~ 'Significant at p = 0.05', pvalue > 0.05 ~ 'Not significant'))
+
+#IQ, EF and Smoking passed the correction
+
+num_hosp_ntprstable <- num_hosp_ntprstable %>% mutate(ntPRS = str_replace(ntPRS,'non_transmitted_prs_scz', 'Schizophrenia'),ntPRS = str_replace(ntPRS,'non_transmitted_prs_bd', 'Bipolar Disorder'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_mdd', 'Depression'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_IQ', 'IQ'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_EF', 'Executive Function'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_cud', 'Cannabis Use'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_alcohol', 'Alcohol Dependence'),ntPRS = str_replace(ntPRS,'non_transmitted_prs_smoking', 'Smoking'))
+
+num_hosp_ntprstable_word <- mutate_if(num_hosp_ntprstable, is.numeric, round, digit = 3) 
+
+num_hosp_ntprstable_word <- flextable(num_hosp_ntprstable_word, col_keys = c('ntPRS', 'Estimate', 'RateRatioCL', 'pvalue')) %>% 
+  compose(j = 'RateRatioCL', value = as_paragraph(sprintf(RateRatio,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>% 
+  add_header_lines('Table  14: Proband ntPRS and Number of Hospitalization - EU') %>% 
+  color(~ pvalue < 0.001, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  Estimate = 'Beta',
+  ntPRS = 'ntPGS',
+  pvalue = 'P value',
+  RateRatioCL = 'Rate Ratio (95% CI)'
+)) %>% set_table_properties(layout = "autofit") 
+```
+
+```{r}
+num_hosp_prstable
+num_hosp_ntprstable
+
+num_hosp_prstable$type <- 'PGS'
+num_hosp_ntprstable$type <- 'ntPGS'
+
+colnames(num_hosp_prstable)[1] <- 'PGS'
+colnames(num_hosp_ntprstable)[1] <- 'PGS'
+
+
+test <- rbind(num_hosp_prstable, num_hosp_ntprstable)
+
+test$type <- as.factor(test$type) %>% relevel('PGS')
+test$PGS <- as.factor(test$PGS) %>% ordered(levels = rev(c('Schizophrenia',"Bipolar Disorder","Depression","IQ","Executive Function","Cannabis Use","Alcohol Dependence","Smoking")))
+
+
+ggplot(test, aes(y = PGS, x = RateRatio)) +
+  geom_point(aes(color = sign),shape = 18, size = 5) +  
+  scale_color_manual(values = c("black", 'pink'), name = '') + 
+  geom_errorbarh(aes(xmin = CI_lower, xmax = CI_upper), height = 0.25) +
+  geom_vline(xintercept = 1, color = "red", linetype = "dashed", cex = 1, alpha = 0.5) + facet_wrap(~type)+
+  xlab("Rate Ratio (95% CI)") + 
+  ylab(" ") + theme_classic() +
+  ggtitle('Figure 10: Polygenic Scores and non-transmitted PGS with number of hospitalizations - EU') +
+  theme(plot.title = element_text(hjust = 0.4))
+
+ggsave(filename = 'figure10_prs_ntprs_num_hosp-eu.tiff', units = 'in', width = 7.5, height = 5, dpi = 700, device = 'tiff')
+
+table8 <- as_grouped_data(x = test, groups = c('type')) %>% flextable::as_flextable(col_keys = c('Genotype', 'RRCI', 'pvalue'))%>% 
+  compose(j = 'RRCI', i= ~ is.na(type), value = as_paragraph(sprintf(RateRatio,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>%compose(j = 'Genotype',i= ~ is.na(type), value = as_paragraph(PGS)) %>%
+  compose(j = 'pvalue', i= ~ is.na(type), value = as_paragraph(sprintf(pvalue,fmt = '%#.3f '))) %>%
+  add_header_lines('Table  8: Proband PGS, ntPGS and number of hospitalizations - EU') %>% 
+  color(~ pvalue < 0.05, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  pvalue = 'P value',
+  RRCI = 'Rate Ratio (95% CI)'
+)) %>% bold(j = 1, i = ~ !is.na(type), bold = TRUE, part = "body") %>%
+  compose(i = 18, j = 3, as_paragraph(as_chunk('< 0.001'))) %>%
+  bold(part = "header", bold = TRUE)%>% set_table_properties(layout = "autofit")
+table8 %>%save_as_image(path = 'table8.png')
+
+
+
+```
+
+
+```{r}
+library(webshot)
+
+```
+
+```{R}
+mother_prs_pc <- phenotype_pc_prs %>% 
+  filter(IndividualID == 3) %>% 
+  filter(!(FamilyID %in% excluding_family_id))
+
+mother_prs_pc <- subset(mother_prs_pc, select = grepl(pattern = 'FamilyID|IQ_Pt_0.05|IndividualID|PC|smoking_Pt_0.05', names(mother_prs_pc))) %>% rename_with(~ paste0(.x, '_mother'))
+
+mother_prs_pc$IndividualID_mother <- 1
+
+mother_prs_pc$mergeID <- str_c(mother_prs_pc$FamilyID_mother, '-',mother_prs_pc$IndividualID_mother)
+
+mother_prs_pc <- mother_prs_pc %>% subset(select=-c(FamilyID_mother, IndividualID_mother))
+
+case_phenotype_prs <- left_join(case_phenotype_prs, mother_prs_pc, by = c('IID'='mergeID'))
+
+father_prs_pc <- phenotype_pc_prs %>% 
+  filter(IndividualID == 2) %>% 
+  filter(!(FamilyID %in% excluding_family_id))
+
+father_prs_pc <- subset(father_prs_pc, select = grepl(pattern = 'FamilyID|IQ_Pt_0.05|IndividualID|PC|smoking_Pt_0.05', names(father_prs_pc))) %>% rename_with(~ paste0(.x, '_father'))
+
+father_prs_pc$IndividualID_father <- 1
+
+father_prs_pc$mergeID <- str_c(father_prs_pc$FamilyID_father, '-',father_prs_pc$IndividualID_father)
+
+father_prs_pc <- father_prs_pc %>% subset(select=-c(FamilyID_father, IndividualID_father))
+
+case_phenotype_prs <- left_join(case_phenotype_prs, father_prs_pc, by = c('IID'='mergeID'))
+
+
+num_hosp_parentprs_mod <- list()
+num_hosp_parentprs_table <- data.frame()
+for(i in c('IQ_Pt_0.05', 'smoking_Pt_0.05')){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs),i)
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_parentprs_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_parentprs_mod[[i]])
+  confint <- confint(num_hosp_parentprs_mod[[i]])
+  num_hosp_parentprs_table <- data.frame(Genotype = i, Estimate_proband=summary$coefficients[2,'Estimate'], pvalue_proband=summary$coefficients[2,'Pr(>|z|)'], CI_lower_proband = confint[2, '2.5 %'], CI_upper_proband = confint[2, '97.5 %'],Estimate_father = summary$coefficients[3,'Estimate'], pvalue_father=summary$coefficients[3,'Pr(>|z|)'], CI_lower_father = confint[3, '2.5 %'], CI_upper_father = confint[3, '97.5 %'], Estimate_mother = summary$coefficients[4,'Estimate'], pvalue_mother=summary$coefficients[4,'Pr(>|z|)'], CI_lower_mother = confint[4, '2.5 %'], CI_upper_mother = confint[4, '97.5 %']) %>% add_row(num_hosp_parentprs_table,.before = 1)
+}
+
+mutate_if(num_hosp_parentprs_table, is.numeric, round, digit = 3) %>% flextable() %>% add_header_lines('Appendix Table  1: Effects of Parents PGS when controlling for Proband PGS') %>% save_as_image(path = 'appendix.png')
+```
+
+#doing following up analysis...
+
+
+```{r}
+#mother effect
+
+
+#IQ
+num_hosp_motherprs_mod <- list()
+num_hosp_motherprs_table <- data.frame()
+for(i in 1:2){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness','PC1_mother', 'PC2_mother' , 'PC3_mother', 'PC4_mother','PC5_mother', 'PC6_mother' , 'PC7_mother', 'PC8_mother','PC9_mother','PC10_mother')
+  predictors_ntprs <- str_subset(colnames(case_phenotype_prs),'_0.05_mother')[i:i] 
+  predictors <- predictors_ntprs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_motherprs_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_motherprs_mod[[i]])
+  confint <- confint(num_hosp_motherprs_mod[[i]])
+  num_hosp_motherprs_table <- data.frame(PRS=rownames(summary$coefficients)[2], Rate_Ratio_m =exp(summary$coefficients[predictors_ntprs,'Estimate']), CI_lower_m = exp(confint[predictors_ntprs, '2.5 %']), CI_upper_m = exp(confint[predictors_ntprs, '97.5 %']), pvalue_m=summary$coefficients[predictors_ntprs,'Pr(>|z|)']) %>% add_row(num_hosp_motherprs_table,.before = 1)
+}
+
+num_hosp_motherprs_table <- num_hosp_motherprs_table %>% 
+  mutate(PRS = str_replace(PRS,'IQ_Pt_0.05_mother', 'IQ'),
+         PRS = str_replace(PRS,'smoking_Pt_0.05_mother', 'Smoking'))
+colnames(num_hosp_motherprs_table)[1] <- 'Maternal PGS'
+
+num_hosp_motherprs_table_word <- mutate_if(num_hosp_motherprs_table, is.numeric, round, digit = 3) 
+
+
+```
+
+
+#father effect
+
+```{r}
+
+
+
+num_hosp_fatherprs_mod <- list()
+num_hosp_fatherprs_table <- data.frame()
+for(i in 1:2){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness','PC1_father', 'PC2_father' , 'PC3_father', 'PC4_father','PC5_father', 'PC6_father' , 'PC7_father', 'PC8_father','PC9_father','PC10_father')
+  predictors_ntprs <- str_subset(colnames(case_phenotype_prs),'0.05_father')[i:i] 
+  predictors <- predictors_ntprs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_fatherprs_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_fatherprs_mod[[i]])
+  confint <- confint(num_hosp_fatherprs_mod[[i]])
+  num_hosp_fatherprs_table <- data.frame(PRS=rownames(summary$coefficients)[2], Rate_ratio_f = exp(summary$coefficients[predictors_ntprs,'Estimate']), CI_lower_f = exp(confint[predictors_ntprs, '2.5 %']), CI_upper_f = exp(confint[predictors_ntprs, '97.5 %']), pvalue_f=summary$coefficients[predictors_ntprs,'Pr(>|z|)']) %>% add_row(num_hosp_fatherprs_table,.before = 1)
+}
+ 
+
+num_hosp_fatherprs_table <- num_hosp_fatherprs_table %>% 
+  mutate(PRS = str_replace(PRS,'IQ_Pt_0.05_father', 'IQ'),
+         PRS = str_replace(PRS,'smoking_Pt_0.05_father', 'Smoking'))
+
+colnames(num_hosp_fatherprs_table)[1] <- 'PGS'
+
+num_hosp_fatherprs_table_word <- mutate_if(num_hosp_fatherprs_table, is.numeric, round, digit = 3)
+
+
+
+
+test <- cbind(num_hosp_fatherprs_table,num_hosp_motherprs_table)
+
+table12 <- flextable(test, col_keys = c('PGS', 'RRCI_f', 'pvalue_f', 'RRCI_m', 'pvalue_m'))%>% 
+  compose(j = 'PGS',value = as_paragraph(PGS)) %>%
+  compose(j = 'RRCI_f', value = as_paragraph(sprintf(Rate_ratio_f,fmt = '%#.3f '), as_bracket(CI_lower_f, CI_upper_f))) %>%
+  compose(j = 'pvalue_f', value = as_paragraph(sprintf(pvalue_f,fmt = '%#.3f '))) %>%
+  compose(j = 'RRCI_m', value = as_paragraph(sprintf(Rate_Ratio_m,fmt = '%#.3f '), as_bracket(CI_lower_m, CI_upper_m))) %>%
+  compose(j = 'pvalue_m', value = as_paragraph(sprintf(pvalue_m,fmt = '%#.3f '))) %>%
+  color(~ pvalue_f < 0.05, ~ pvalue_f, color = "red") %>% 
+  set_header_labels(values = list(
+  pvalue_m = 'P value',
+  RRCI_m = 'Rate Ratio (95% CI)',
+  pvalue_f = 'P value',
+  RRCI_f = 'Rate Ratio (95% CI)'
+)) %>%
+  add_header_row(colwidths = c(1,2,2), values = c('','Paternal', 'Maternal'))%>%
+  add_header_lines("Table  12: Paternal and Maternal PGS and probands' hospitalizations") %>% set_table_properties(layout = "autofit")
+
+table12 %>%save_as_image(path = 'table12.png')
+table12 %>%save_as_docx(path = 'table12.docx')
+```
+
+#### exploratory analysis - family history pathways
+
+```{r}
+num_hosp_family_history_mod <- list()
+num_hosp_family_history_table <- data.frame()
+
+for(i in c(5)){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'family_history', 'PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs), 'IQ')[i]
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_family_history_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_family_history_mod[[i]])
+  confint <- confint(num_hosp_family_history_mod[[i]])
+  num_hosp_family_history_table <- data.frame(PRS = predictors_prs, OR_withfamilyhistory=exp(summary$coefficients[2,'Estimate']), CI_lower_withfamilyhistory = exp(confint[2, '2.5 %']), CI_upper_withfamilyhistory= exp(confint[2, '97.5 %']), pvalue_withfamilyhistory=summary$coefficients[2,'Pr(>|z|)']) %>% add_row(num_hosp_family_history_table,.before = 1)
+}
+
+for(i in c(7)){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'family_history', 'PC1_mother', 'PC2_mother' , 'PC3_mother', 'PC4_mother','PC5_mother', 'PC6_mother' , 'PC7_mother', 'PC8_mother','PC9_mother','PC10_mother')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs), 'IQ')[i]
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_family_history_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_family_history_mod[[i]])
+  confint <- confint(num_hosp_family_history_mod[[i]])
+  num_hosp_family_history_table <- data.frame(PRS = predictors_prs, OR_withfamilyhistory=exp(summary$coefficients[2,'Estimate']), CI_lower_withfamilyhistory = exp(confint[2, '2.5 %']), CI_upper_withfamilyhistory= exp(confint[2, '97.5 %']), pvalue_withfamilyhistory=summary$coefficients[2,'Pr(>|z|)']) %>% add_row(num_hosp_family_history_table,.before = 1)
+}
+
+
+
+for(i in c(5)){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'family_history', 'PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs), 'smoking')[i]
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_family_history_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_family_history_mod[[i]])
+  confint <- confint(num_hosp_family_history_mod[[i]])
+  num_hosp_family_history_table <- data.frame(PRS = predictors_prs, OR_withfamilyhistory=exp(summary$coefficients[2,'Estimate']), CI_lower_withfamilyhistory = exp(confint[2, '2.5 %']), CI_upper_withfamilyhistory= exp(confint[2, '97.5 %']), pvalue_withfamilyhistory=summary$coefficients[2,'Pr(>|z|)']) %>% add_row(num_hosp_family_history_table,.before = 1)
+}
+
+for(i in c(8)){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'family_history', 'PC1_father', 'PC2_father' , 'PC3_father', 'PC4_father','PC5_father', 'PC6_father' , 'PC7_father', 'PC8_father','PC9_father','PC10_father')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs), 'smoking')[i]
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_family_history_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_family_history_mod[[i]])
+  confint <- confint(num_hosp_family_history_mod[[i]])
+  num_hosp_family_history_table <- data.frame(PRS = predictors_prs, OR_withfamilyhistory=exp(summary$coefficients[2,'Estimate']), CI_lower_withfamilyhistory = exp(confint[2, '2.5 %']), CI_upper_withfamilyhistory= exp(confint[2, '97.5 %']), pvalue_withfamilyhistory=summary$coefficients[2,'Pr(>|z|)']) %>% add_row(num_hosp_family_history_table,.before = 1)
+}
+
+
+
+num_hosp_family_history_table <- num_hosp_family_history_table %>% 
+  mutate(PRS = str_replace(PRS,'IQ_Pt_0.05_mother', 'Maternal IQ PGS'),
+         PRS = str_replace(PRS,'EF_Pt_0.05_mother', 'Maternal EF PGS'), 
+         PRS = str_replace(PRS,'smoking_Pt_0.05_father', 'Paternal Smoking PGS'),
+         PRS = str_replace(PRS,'non_transmitted_prs_IQ', 'IQ ntPGS'),
+         PRS = str_replace(PRS,'non_transmitted_prs_EF', 'EF ntPGS'),
+         PRS = str_replace(PRS,'non_transmitted_prs_smoking', 'Smoking ntPGS'),
+         PRS = str_replace(PRS,'non_transmitted_prs_alcohol', 'Alcohol ntPGS'),
+         PRS = str_replace(PRS,'alcohol_Pt_0.05_mother', 'Maternal Alcohol PGS')
+         )
+
+colnames(num_hosp_family_history_table) <- c('ntPGS and Parental PGS', 'OR', 'CI_lower', 'CI_upper', 'pvalue')
+
+num_hosp_family_history_table_word <- mutate_if(num_hosp_family_history_table, is.numeric, round, digit = 3) 
+
+table13 <- flextable(num_hosp_family_history_table_word, col_keys = c('ntPGS and Parental PGS', 'RateRatioCL', 'pvalue')) %>% 
+  compose(j = 'RateRatioCL', value = as_paragraph(sprintf(OR,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>% 
+  add_header_lines('Table  13: ntPGS, parental PRS, and Number of Hospitalization accounting for family history') %>% 
+  color(~ pvalue < 0.05, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  pvalue = 'P value',
+  RateRatioCL = 'Rate Ratio (95% CI)')) %>%
+  set_table_properties(layout = "autofit") 
+table13 %>% save_as_image(path = 'table13.png')
+table13 %>% save_as_docx(path = 'table13.docx')
+#save_as_image(num_hosp_family_history_table_word,path = 'table17.png')
+
+age_onset_ntprsmod_familyhistory <- list()
+age_onset_ntprstable_familyhistory <- data.frame()
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex','parent_psychosis','PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_ntprs <- str_subset(colnames(case_phenotype_prs),'non_transmitted')[i:i]
+  predictor <- predictors_ntprs %>% append(predictors_covariables) %>% na.omit()
+  age_onset_ntprsmod_familyhistory[[i]] <- coxph(surv_object_illonset~., data = case_phenotype_prs[, c(predictor)]) 
+  summary <- summary(age_onset_ntprsmod_familyhistory[[i]])
+  age_onset_ntprstable_familyhistory <- data.frame(ntPRS=rownames(summary$conf.int)[1],'Parameter Estimate'= summary$coefficients[predictors_ntprs,'coef'],'P value'=summary$coefficients[predictors_ntprs,'Pr(>|z|)'], 'Hazard ratios' = summary$conf.int[predictors_ntprs,'exp(coef)'], 'HR CI lower' = summary$conf.int[predictors_ntprs, 'lower .95'], 'HR CI upper' = summary$conf.int[predictors_ntprs, 'upper .95']) %>% add_row(age_onset_ntprstable_familyhistory,.before = 1)
+}
+```
+
+```{r}
+save_as_docx(age_onset_prstable_word,age_onset_ntprstable_word,
+             quality_remission_prstable_word,quality_remission_ntprstable_word,
+             num_hosp_prstable_word,num_hosp_ntprstable_word, 
+             num_hosp_motherprs_table, num_hosp_fatherprs_table,
+             num_hosp_family_history_table_word,
+             path = 'dissertation table2.docx')
+
+```
+
+#### Number of hosp < 20 sample 
+```{r}
+
+case_phenotype_prs <- case_phenotype_prs %>% mutate(num_hosp = replace(num_hosp, which(num_hosp>20), NA))
+
+ggplot(case_phenotype_prs, aes(x = num_hosp)) + geom_histogram(aes(y = ..density..),colour="black", fill="white") +geom_density(alpha=.2, fill="#FF6666")+facet_grid(sex ~ .)
+table(case_phenotype_prs$num_hosp)
+
+#library(AER)
+df1 = glm(num_hosp ~ DSM4 + sex+ age+ Durations_of_illness+PC1+ PC2 + PC3+ PC4+PC5+ PC6 + PC7+ PC8+PC9+PC10 + BD_Pt_0.05 ,family=poisson, data = case_phenotype_prs)
+dp = sum(residuals(df1, type="pearson")^2)/df1$df.residual 
+dp
+#summary(df1, dispersion=dp)
+
+num_hosp_prsmod <- list()
+num_hosp_prstable <- data.frame()
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness','PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs),'_0.05')[i:i] 
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_prsmod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_prsmod[[i]])
+  confint <- confint(num_hosp_prsmod[[i]])
+  num_hosp_prstable <- data.frame(PRS=rownames(summary$coefficients)[2], Estimate = summary$coefficients[predictors_prs,'Estimate'],RateRatio = exp(summary$coefficients[predictors_prs,'Estimate']), CI_lower = exp(confint[predictors_prs, '2.5 %']), CI_upper = exp(confint[predictors_prs, '97.5 %']), pvalue=summary$coefficients[predictors_prs,'Pr(>|z|)']) %>% add_row(num_hosp_prstable,.before = 1)
+}
+
+
+num_hosp_prstable <- num_hosp_prstable %>% mutate(sign = case_when(pvalue < 0.05 ~ 'Significant at p = 0.05', pvalue > 0.05 ~ 'Not significant'))
+
+num_hosp_prstable<- num_hosp_prstable %>% mutate(PRS = str_replace(PRS,'SCZ_Pt_0.05', 'Schizophrenia'),PRS = str_replace(PRS,'BD_Pt_0.05', 'Bipolar Disorder'), PRS = str_replace(PRS,'MDD_Pt_0.05', 'Depression'), PRS = str_replace(PRS,'IQ_Pt_0.05', 'IQ'), PRS = str_replace(PRS,'EF_Pt_0.05', 'Executive Function'), PRS = str_replace(PRS,'CUD_Pt_0.05', 'Cannabis Use'), PRS = str_replace(PRS,'alcohol_Pt_0.05', 'Alcohol Dependence'),PRS = str_replace(PRS,'smoking_Pt_0.05', 'Smoking'))
+                                                  
+num_hosp_prstable_word <- mutate_if(num_hosp_prstable, is.numeric, round, digit = 3) 
+
+num_hosp_prstable_word <- flextable(num_hosp_prstable_word, col_keys = c('PRS', 'Estimate', 'RateRatioCL', 'pvalue')) %>% 
+  compose(j = 'RateRatioCL', value = as_paragraph(sprintf(RateRatio,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>% 
+  add_header_lines('Table  18: Proband PGS and Number of Hospitalization (<20)') %>% 
+  color(~ pvalue < 0.001, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+    PRS = 'PGS',
+  pvalue = 'P value',
+  RateRatioCL = 'Rate Ratio (95% CI)'
+)) %>% 
+  set_table_properties(layout = "autofit") 
+
+save_as_image(num_hosp_prstable_word,path = 'table18.png')
+
+# BD passed multiple comparision problems
+#analysis for pTDT
+#pTDT_bd_for_num_hosp  <- glm(num_hosp ~ pTDT_bd + DSM4 + sex + age + #Durations_of_illness,data = case_phenotype_prs, family = poisson)
+
+#summary(pTDT_bd_for_num_hosp)
+
+#confint(pTDT_bd_for_num_hosp)
+
+
+
+```
+
+### number of hosp ntPRS
+```{R}
+num_hosp_ntprsmod <- list()
+num_hosp_ntprstable <- data.frame()
+for(i in 1:8){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness','PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_ntprs <- str_subset(colnames(case_phenotype_prs),'non_transmitted')[i:i] 
+  predictors <- predictors_ntprs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_ntprsmod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_ntprsmod[[i]])
+  confint <- confint(num_hosp_ntprsmod[[i]])
+  num_hosp_ntprstable <- data.frame(ntPRS=rownames(summary$coefficients)[2],  Estimate = summary$coefficients[predictors_ntprs,'Estimate'], RateRatio = exp(summary$coefficients[predictors_ntprs,'Estimate']), CI_lower = exp(confint[predictors_ntprs, '2.5 %']), CI_upper = exp(confint[predictors_ntprs, '97.5 %']), pvalue =summary$coefficients[predictors_ntprs,'Pr(>|z|)']) %>% add_row(num_hosp_ntprstable,.before = 1)
+}
+
+num_hosp_ntprstable <- num_hosp_ntprstable %>% mutate(sign = case_when(pvalue < 0.05 ~ 'Significant at p = 0.05', pvalue > 0.05 ~ 'Not significant'))
+
+#IQ, EF and Smoking passed the correction
+
+num_hosp_ntprstable <- num_hosp_ntprstable %>% mutate(ntPRS = str_replace(ntPRS,'non_transmitted_prs_scz', 'Schizophrenia'),ntPRS = str_replace(ntPRS,'non_transmitted_prs_bd', 'Bipolar Disorder'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_mdd', 'Depression'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_IQ', 'IQ'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_EF', 'Executive Function'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_cud', 'Cannabis Use'), ntPRS = str_replace(ntPRS,'non_transmitted_prs_alcohol', 'Alcohol Dependence'),ntPRS = str_replace(ntPRS,'non_transmitted_prs_smoking', 'Smoking'))
+
+num_hosp_ntprstable_word <- mutate_if(num_hosp_ntprstable, is.numeric, round, digit = 3) 
+
+num_hosp_ntprstable_word <- flextable(num_hosp_ntprstable_word, col_keys = c('ntPRS', 'Estimate', 'RateRatioCL', 'pvalue')) %>% 
+  compose(j = 'RateRatioCL', value = as_paragraph(sprintf(RateRatio,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>% 
+  add_header_lines('Table  19: Proband ntPGS and Number of Hospitalization (<20)') %>% 
+  color(~ pvalue < 0.001, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  ntPRS = 'ntPGS',
+  pvalue = 'P value',
+  RateRatioCL = 'Rate Ratio (95% CI)'
+)) %>% set_table_properties(layout = "autofit") 
+save_as_image(num_hosp_ntprstable_word,path = 'table19.png')
+```
+
+```{r}
+num_hosp_prstable
+num_hosp_ntprstable
+
+num_hosp_prstable$type <- 'PGS'
+num_hosp_ntprstable$type <- 'ntPGS'
+
+colnames(num_hosp_prstable)[1] <- 'PGS'
+colnames(num_hosp_ntprstable)[1] <- 'PGS'
+
+
+test <- rbind(num_hosp_prstable, num_hosp_ntprstable)
+
+test$type <- as.factor(test$type) %>% relevel('PGS')
+test$PGS <- as.factor(test$PGS) %>% ordered(levels = rev(c('Schizophrenia',"Bipolar Disorder","Depression","IQ","Executive Function","Cannabis Use","Alcohol Dependence","Smoking")))
+
+
+ggplot(test, aes(y = PGS, x = RateRatio)) +
+  geom_point(aes(color = sign),shape = 18, size = 5) +  
+  scale_color_manual(values = c("black", 'pink'), name = '') + 
+  geom_errorbarh(aes(xmin = CI_lower, xmax = CI_upper), height = 0.25) +
+  geom_vline(xintercept = 1, color = "red", linetype = "dashed", cex = 1, alpha = 0.5) + facet_wrap(~type)+
+  xlab("Rate Ratio (95% CI)") + 
+  ylab(" ") + theme_classic() +
+  ggtitle('Figure 11: Polygenic Scores and non-transmitted PGS with number of hospitalizations < 20') +
+  theme(plot.title = element_text(hjust = 0.4, size = 10))
+
+ggsave(filename = 'figure11_prs_ntprs_num_hosp_less_20.tiff', units = 'in', width = 7.5, height = 5, dpi = 700, device = 'tiff')
+
+table9 <- as_grouped_data(x = test, groups = c('type')) %>% flextable::as_flextable(col_keys = c('Genotype', 'RRCI', 'pvalue'))%>% 
+  compose(j = 'RRCI', i= ~ is.na(type), value = as_paragraph(sprintf(RateRatio,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>%compose(j = 'Genotype',i= ~ is.na(type), value = as_paragraph(PGS)) %>%
+  compose(j = 'pvalue', i= ~ is.na(type), value = as_paragraph(sprintf(pvalue,fmt = '%#.3f '))) %>%
+  add_header_lines('Table  9: Proband PGS, ntPGS and number of hospitalizations < 20') %>% 
+  color(~ pvalue < 0.05, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  pvalue = 'P value',
+  RRCI = 'Rate Ratio (95% CI)'
+)) %>% bold(j = 1, i = ~ !is.na(type), bold = TRUE, part = "body") %>%
+  bold(part = "header", bold = TRUE)%>% set_table_properties(layout = "autofit")
+
+table9 %>%save_as_image(path = 'table9.png')
+
+```
+
+#father effect
+
+```{r}
+
+num_hosp_fatherprs_mod <- list()
+num_hosp_fatherprs_table <- data.frame()
+for(i in 1:1){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness','PC1_father', 'PC2_father' , 'PC3_father', 'PC4_father','PC5_father', 'PC6_father' , 'PC7_father', 'PC8_father','PC9_father','PC10_father')
+  predictors_ntprs <- str_subset(colnames(case_phenotype_prs),'smoking_Pt_0.05_father')[i] 
+  predictors <- predictors_ntprs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_fatherprs_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_fatherprs_mod[[i]])
+  confint <- confint(num_hosp_fatherprs_mod[[i]])
+  num_hosp_fatherprs_table <- data.frame(PRS=rownames(summary$coefficients)[2], Rate_ratio = exp(summary$coefficients[predictors_ntprs,'Estimate']), CI_lower = exp(confint[predictors_ntprs, '2.5 %']), CI_upper = exp(confint[predictors_ntprs, '97.5 %']), pvalue=summary$coefficients[predictors_ntprs,'Pr(>|z|)']) %>% add_row(num_hosp_fatherprs_table,.before = 1)
+}
+ 
+
+num_hosp_fatherprs_table <- num_hosp_fatherprs_table %>% 
+  mutate(PRS = str_replace(PRS,'smoking_Pt_0.05_father', 'Smoking'))
+
+colnames(num_hosp_fatherprs_table)[1] <- 'Paternal PGS'
+
+num_hosp_fatherprs_table_word <- mutate_if(num_hosp_fatherprs_table, is.numeric, round, digit = 3)
+
+num_hosp_fatherprs_table_word <- flextable(num_hosp_fatherprs_table_word, col_keys = c('Paternal PGS', 'RateRatioCL', 'pvalue')) %>% 
+  compose(j = 'RateRatioCL', value = as_paragraph(sprintf(Rate_ratio,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>% 
+  add_header_lines('Table  x: Paternal PRS and Number of Hospitalization < 20') %>% 
+  color(~ pvalue < 0.001, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  pvalue = 'P value',
+  RateRatioCL = 'Rate Ratio (95% CI)')) %>%
+  set_table_properties(layout = "autofit") 
+
+num_hosp_fatherprs_table_word
+```
+
+#### exploratory analysis - family history pathways
+
+```{r}
+num_hosp_family_history_mod <- list()
+num_hosp_family_history_table <- data.frame()
+
+for(i in c(5)){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'family_history', 'PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs), 'IQ')[i]
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_family_history_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_family_history_mod[[i]])
+  confint <- confint(num_hosp_family_history_mod[[i]])
+  num_hosp_family_history_table <- data.frame(PRS = predictors_prs, OR_withfamilyhistory=exp(summary$coefficients[2,'Estimate']), CI_lower_withfamilyhistory = exp(confint[2, '2.5 %']), CI_upper_withfamilyhistory= exp(confint[2, '97.5 %']), pvalue_withfamilyhistory=summary$coefficients[2,'Pr(>|z|)']) %>% add_row(num_hosp_family_history_table,.before = 1)
+}
+
+for(i in c(7)){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'family_history', 'PC1_mother', 'PC2_mother' , 'PC3_mother', 'PC4_mother','PC5_mother', 'PC6_mother' , 'PC7_mother', 'PC8_mother','PC9_mother','PC10_mother')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs), 'IQ')[i]
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_family_history_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_family_history_mod[[i]])
+  confint <- confint(num_hosp_family_history_mod[[i]])
+  num_hosp_family_history_table <- data.frame(PRS = predictors_prs, OR_withfamilyhistory=exp(summary$coefficients[2,'Estimate']), CI_lower_withfamilyhistory = exp(confint[2, '2.5 %']), CI_upper_withfamilyhistory= exp(confint[2, '97.5 %']), pvalue_withfamilyhistory=summary$coefficients[2,'Pr(>|z|)']) %>% add_row(num_hosp_family_history_table,.before = 1)
+}
+
+
+
+for(i in c(5)){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'family_history', 'PC1', 'PC2' , 'PC3', 'PC4','PC5', 'PC6' , 'PC7', 'PC8','PC9','PC10')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs), 'smoking')[i]
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_family_history_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_family_history_mod[[i]])
+  confint <- confint(num_hosp_family_history_mod[[i]])
+  num_hosp_family_history_table <- data.frame(PRS = predictors_prs, OR_withfamilyhistory=exp(summary$coefficients[2,'Estimate']), CI_lower_withfamilyhistory = exp(confint[2, '2.5 %']), CI_upper_withfamilyhistory= exp(confint[2, '97.5 %']), pvalue_withfamilyhistory=summary$coefficients[2,'Pr(>|z|)']) %>% add_row(num_hosp_family_history_table,.before = 1)
+}
+
+for(i in c(8)){
+  predictors_covariables <- c('DSM4', 'sex', 'age', 'Durations_of_illness', 'family_history', 'PC1_father', 'PC2_father' , 'PC3_father', 'PC4_father','PC5_father', 'PC6_father' , 'PC7_father', 'PC8_father','PC9_father','PC10_father')
+  predictors_prs <- str_subset(colnames(case_phenotype_prs), 'smoking')[i]
+  predictors <- predictors_prs %>% append(predictors_covariables) %>% na.omit()
+  num_hosp_family_history_mod[[i]] <- glm.nb(num_hosp~.,data = case_phenotype_prs[, c('num_hosp', predictors)])
+  summary <- summary(num_hosp_family_history_mod[[i]])
+  confint <- confint(num_hosp_family_history_mod[[i]])
+  num_hosp_family_history_table <- data.frame(PRS = predictors_prs, OR_withfamilyhistory=exp(summary$coefficients[2,'Estimate']), CI_lower_withfamilyhistory = exp(confint[2, '2.5 %']), CI_upper_withfamilyhistory= exp(confint[2, '97.5 %']), pvalue_withfamilyhistory=summary$coefficients[2,'Pr(>|z|)']) %>% add_row(num_hosp_family_history_table,.before = 1)
+}
+
+
+num_hosp_family_history_table <- num_hosp_family_history_table %>% 
+  mutate(PRS = str_replace(PRS,'IQ_Pt_0.05_mother', 'Maternal IQ PGS'),
+         PRS = str_replace(PRS,'EF_Pt_0.05_mother', 'Maternal EF PGS'), 
+         PRS = str_replace(PRS,'smoking_Pt_0.05_father', 'Paternal Smoking PGS'),
+         PRS = str_replace(PRS,'non_transmitted_prs_IQ', 'IQ ntPGS'),
+         PRS = str_replace(PRS,'non_transmitted_prs_EF', 'EF ntPGS'),
+         PRS = str_replace(PRS,'non_transmitted_prs_smoking', 'Smoking ntPGS'),
+         PRS = str_replace(PRS,'non_transmitted_prs_alcohol', 'Alcohol ntPGS'),
+         PRS = str_replace(PRS,'alcohol_Pt_0.05_mother', 'Maternal Alcohol PGS')
+         )
+
+colnames(num_hosp_family_history_table) <- c('ntPGS and Parental PGS', 'OR', 'CI_lower', 'CI_upper', 'pvalue')
+
+num_hosp_family_history_table_word <- mutate_if(num_hosp_family_history_table, is.numeric, round, digit = 3) 
+
+num_hosp_family_history_table_word <- flextable(num_hosp_family_history_table_word, col_keys = c('ntPGS and Parental PGS', 'RateRatioCL', 'pvalue')) %>% 
+  compose(j = 'RateRatioCL', value = as_paragraph(sprintf(OR,fmt = '%#.3f '), as_bracket(CI_lower, CI_upper))) %>% 
+  add_header_lines('Table  17: ntPGS, parental PRS, and Number of Hospitalization accounting for family history') %>% 
+  color(~ pvalue < 0.001, ~ pvalue, color = "red") %>% 
+  set_header_labels(values = list(
+  pvalue = 'P value',
+  RateRatioCL = 'Rate Ratio (95% CI)')) %>%
+  set_table_properties(layout = "autofit") 
+
+num_hosp_family_history_table_word
+```
+
+
+```{r}
+
+gwas_table <- read_csv(file = 'gwas_table.csv')
+
+gwas_table <- flextable(gwas_table) %>% add_header_lines('Table 2: Summary of Genome-Wide Association Studies') %>% add_footer_row(value = '*Diagnosis according to international consensus criteria including DSM-4, DSM-5, ICD-9 or ICD-10',colwidths = 5)%>%
+  set_table_properties(layout = "autofit")
+
+save_as_image(gwas_table,path = 'gwas_sumamry.png')
+save_as_docx(gwas_table, path = 'gwas summary.docx')
+library(officer)
+sect_properties <- prop_section(
+  page_size = page_size(
+    width = 20, height = 100
+  ),
+  type = "nextPage",
+  page_margins = page_mar()
+)
+save_as_docx(table3, table4,table5, table6, table7, table8,table9,table10,table11,table12,table13,table14,table15,path = 'table.docx',pr_section = sect_properties)
+```
